@@ -1,6 +1,10 @@
 # Freshdesk MCP Server
 
+Developed and maintained by [Bright Security](https://brightsec.com).
+
 An MCP (Model Context Protocol) server for integrating with the Freshdesk API. Provides 41 tools for managing support tickets, contacts, companies, and more.
+
+> **Disclaimer:** This software is provided as-is by Bright Security. Use at your own risk. Bright Security makes no warranties regarding the reliability, accuracy, or completeness of this tool. You are solely responsible for how you use it and for any actions performed through the Freshdesk API. Always review tool actions before executing them in production environments.
 
 ## Setup
 
@@ -176,7 +180,7 @@ search_solutions with query "password reset"
 ## Development
 
 ```bash
-git clone https://github.com/dor-shaer/freshdesk_mcp.git
+git clone https://github.com/NeuraLegion/freshdesk_mcp.git
 cd freshdesk_mcp
 npm install
 npm run build
@@ -185,4 +189,4 @@ npm start
 
 ## License
 
-MIT
+MIT. Copyright (c) 2026 Bright Security. See [LICENSE](LICENSE) for details.
