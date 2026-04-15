@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.claude/
+Plans/
+freshworks-mcp/
+hubspot-files-mcp/
+.env
+*.env
+.env.*
