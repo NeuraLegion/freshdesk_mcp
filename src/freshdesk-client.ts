@@ -8,6 +8,24 @@ export interface FreshdeskConfig {
   apiKey: string;
 }
 
+// ==================== ATTACHMENTS ====================
+
+export interface Attachment {
+  id: number;
+  name: string;
+  content_type: string;
+  size: number;
+  attachment_url: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AttachmentDownload {
+  data: Buffer;
+  contentType: string;
+  size: number;
+}
+
 // ==================== TICKETS ====================
 
 export interface Ticket {
@@ -15,6 +33,7 @@ export interface Ticket {
   subject: string;
   description?: string;
   description_text?: string;
+  attachments?: Attachment[];
   status: number;
   priority: number;
   source: number;
@@ -112,7 +131,7 @@ export interface Conversation {
   ticket_id: number;
   created_at: string;
   updated_at: string;
-  attachments: unknown[];
+  attachments: Attachment[];
 }
 
 export interface ReplyParams {
@@ -413,6 +432,39 @@ export class FreshdeskClient {
     }
 
     return response.json() as Promise<T>;
+  }
+
+  // ==================== ATTACHMENTS ====================
+
+  /**
+   * Download an attachment or inline image binary.
+   *
+   * Freshdesk attachment_url values are pre-signed S3 links: they expire after
+   * a short time and must be fetched WITHOUT the Authorization header (S3
+   * rejects requests carrying credentials that don't match the signature).
+   * Inline image URLs (<domain>.freshdesk.com/inline/attachment?token=...)
+   * are token-authenticated and redirect to S3; fetch follows redirects.
+   */
+  async downloadAttachment(url: string, maxBytes: number): Promise<AttachmentDownload> {
+    const response = await fetch(url, { redirect: 'follow' });
+
+    if (!response.ok) {
+      throw new Error(`Attachment download failed (${response.status}): ${await response.text()}`);
+    }
+
+    const contentType = response.headers.get('content-type') || 'application/octet-stream';
+
+    const declaredLength = Number(response.headers.get('content-length') || 0);
+    if (declaredLength > maxBytes) {
+      throw new Error(`Attachment is ${declaredLength} bytes, exceeding the ${maxBytes} byte limit.`);
+    }
+
+    const data = Buffer.from(await response.arrayBuffer());
+    if (data.length > maxBytes) {
+      throw new Error(`Attachment is ${data.length} bytes, exceeding the ${maxBytes} byte limit.`);
+    }
+
+    return { data, contentType, size: data.length };
   }
 
   // ==================== TICKETS ====================

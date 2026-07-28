@@ -45,7 +45,7 @@ npm run build
 }
 ```
 
-## Available Tools (41 Total)
+## Available Tools (43 Total)
 
 ### Ticket Operations (5 tools)
 | Tool | Description |
@@ -62,6 +62,14 @@ npm run build
 | `list_ticket_conversations` | Get all replies and notes for a ticket |
 | `reply_to_ticket` | Send a public reply (emails customer) |
 | `add_note_to_ticket` | Add private or public note |
+
+### Attachments & Images (2 tools)
+| Tool | Description |
+|------|-------------|
+| `get_ticket_attachment` | Download a ticket/conversation attachment; images are returned as viewable image content, text files as text |
+| `view_ticket_inline_image` | Fetch an image embedded in a ticket or conversation body and return it as viewable image content |
+
+`view_ticket` and `list_ticket_conversations` list each attachment (ID, name, type, size) and any inline image URLs found in the HTML body, so the model knows what it can fetch. Downloads are capped at 4 MB, and inline image URLs are only fetched if they actually appear on the requested ticket.
 
 ### Contact Operations (5 tools)
 | Tool | Description |
