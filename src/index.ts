@@ -19,6 +19,7 @@ import {
   type CreateCompanyParams,
   type UpdateCompanyParams,
   type CreateTimeEntryParams,
+  type Attachment,
 } from './freshdesk-client.js';
 
 // Get configuration from environment variables
@@ -59,6 +60,58 @@ const SOURCE_MAP: Record<number, string> = {
   10: 'Outbound Email',
 };
 
+// Attachment/image helpers
+
+// Raw download cap; keeps base64-encoded MCP results within client image limits
+const MAX_ATTACHMENT_BYTES = 4 * 1024 * 1024;
+
+const SUPPORTED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
+
+const TEXT_CONTENT_TYPES = /^text\/|^application\/(json|xml|csv|x-yaml)/;
+
+// CDNs and S3 often serve images as application/octet-stream; detect the real
+// type from magic bytes when the declared content type isn't a supported image
+function sniffImageType(data: Buffer): string | undefined {
+  if (data.length < 12) return undefined;
+  if (data.subarray(0, 4).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47]))) return 'image/png';
+  if (data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff) return 'image/jpeg';
+  if (data.subarray(0, 4).toString('ascii') === 'GIF8') return 'image/gif';
+  if (data.subarray(0, 4).toString('ascii') === 'RIFF' && data.subarray(8, 12).toString('ascii') === 'WEBP') return 'image/webp';
+  return undefined;
+}
+
+function resolveImageType(declared: string, data: Buffer): string {
+  const mimeType = declared.split(';')[0].trim();
+  if (SUPPORTED_IMAGE_TYPES.has(mimeType)) return mimeType;
+  return sniffImageType(data) || mimeType;
+}
+
+function extractInlineImageUrls(html: string | undefined): string[] {
+  if (!html) return [];
+  const urls: string[] = [];
+  const imgRegex = /<img[^>]+src=["']([^"']+)["']/gi;
+  let match;
+  while ((match = imgRegex.exec(html)) !== null) {
+    if (match[1].startsWith('http')) urls.push(match[1]);
+  }
+  return urls;
+}
+
+function formatAttachments(attachments: Attachment[] | undefined, inlineImageUrls: string[]): string {
+  const sections: string[] = [];
+  if (attachments && attachments.length > 0) {
+    const list = attachments.map(a =>
+      `  - ID: ${a.id} | ${a.name} | ${a.content_type} | ${a.size} bytes`
+    ).join('\n');
+    sections.push(`Attachments (fetch images with get_ticket_attachment):\n${list}`);
+  }
+  if (inlineImageUrls.length > 0) {
+    const list = inlineImageUrls.map(u => `  - ${u}`).join('\n');
+    sections.push(`Inline images in body (fetch with view_ticket_inline_image):\n${list}`);
+  }
+  return sections.length > 0 ? `\n${sections.join('\n')}` : '';
+}
+
 // Helper formatters
 function formatTicket(ticket: Record<string, unknown>): string {
   const status = STATUS_MAP[ticket.status as number] || ticket.status;
@@ -78,6 +131,7 @@ Created: ${ticket.created_at}
 Updated: ${ticket.updated_at}
 ${ticket.tags && (ticket.tags as string[]).length > 0 ? `Tags: ${(ticket.tags as string[]).join(', ')}` : ''}
 ${ticket.description_text ? `\nDescription:\n${ticket.description_text}` : ''}
+${formatAttachments(ticket.attachments as Attachment[] | undefined, extractInlineImageUrls(ticket.description as string | undefined))}
 `.trim();
 }
 
@@ -140,6 +194,7 @@ function formatConversation(conv: Record<string, unknown>): string {
 From User ID: ${conv.user_id}
 Created: ${conv.created_at}
 ${conv.body_text || conv.body}
+${formatAttachments(conv.attachments as Attachment[] | undefined, extractInlineImageUrls(conv.body as string | undefined))}
 ---`;
 }
 
@@ -1084,6 +1139,112 @@ server.tool(
       return { content: [{ type: 'text', text: `Found ${roles.length} role(s):\n\n${summary}` }] };
     } catch (error) {
       return { content: [{ type: 'text', text: `Error: ${error instanceof Error ? error.message : String(error)}` }], isError: true };
+    }
+  }
+);
+
+// ==================== ATTACHMENTS & IMAGES ====================
+
+// 42. Get Ticket Attachment
+server.tool(
+  'get_ticket_attachment',
+  'Download a ticket attachment by ID. Images are returned as viewable image content; text files are returned as text. Attachment IDs are listed by view_ticket and list_ticket_conversations.',
+  {
+    ticket_id: z.number().describe('Ticket ID the attachment belongs to'),
+    attachment_id: z.number().describe('Attachment ID (from view_ticket or list_ticket_conversations)'),
+  },
+  async ({ ticket_id, attachment_id }) => {
+    try {
+      // Re-fetch the ticket and conversations so the pre-signed URL is fresh
+      let attachment: Attachment | undefined;
+
+      const ticket = await client.viewTicket(ticket_id);
+      attachment = ticket.attachments?.find(a => a.id === attachment_id);
+
+      if (!attachment) {
+        const conversations = await client.listConversations(ticket_id);
+        for (const conv of conversations) {
+          attachment = conv.attachments?.find(a => a.id === attachment_id);
+          if (attachment) break;
+        }
+      }
+
+      if (!attachment) {
+        return { content: [{ type: 'text' as const, text: `Attachment #${attachment_id} not found on ticket #${ticket_id} or its conversations.` }], isError: true };
+      }
+
+      const download = await client.downloadAttachment(attachment.attachment_url, MAX_ATTACHMENT_BYTES);
+      const mimeType = resolveImageType(attachment.content_type || download.contentType, download.data);
+      const meta = `Attachment #${attachment.id}: ${attachment.name} (${mimeType}, ${download.size} bytes) from ticket #${ticket_id}`;
+
+      if (SUPPORTED_IMAGE_TYPES.has(mimeType)) {
+        return {
+          content: [
+            { type: 'image' as const, data: download.data.toString('base64'), mimeType },
+            { type: 'text' as const, text: meta },
+          ],
+        };
+      }
+
+      if (TEXT_CONTENT_TYPES.test(mimeType)) {
+        return { content: [{ type: 'text' as const, text: `${meta}\n\n${download.data.toString('utf-8')}` }] };
+      }
+
+      return { content: [{ type: 'text' as const, text: `${meta}\n\nThis content type cannot be displayed inline. Supported: images (${[...SUPPORTED_IMAGE_TYPES].join(', ')}) and text files.` }] };
+    } catch (error) {
+      return { content: [{ type: 'text' as const, text: `Error: ${error instanceof Error ? error.message : String(error)}` }], isError: true };
+    }
+  }
+);
+
+// 43. View Ticket Inline Image
+server.tool(
+  'view_ticket_inline_image',
+  'Fetch an inline image embedded in a ticket or conversation body and return it as viewable image content. Inline image URLs are listed by view_ticket and list_ticket_conversations.',
+  {
+    ticket_id: z.number().describe('Ticket ID whose body or conversations contain the image'),
+    url: z.string().describe('Inline image URL (from the "Inline images in body" list)'),
+  },
+  async ({ ticket_id, url }) => {
+    try {
+      let parsed: URL;
+      try {
+        parsed = new URL(url);
+      } catch {
+        return { content: [{ type: 'text' as const, text: `Error: invalid URL: ${url}` }], isError: true };
+      }
+
+      if (parsed.protocol !== 'https:') {
+        return { content: [{ type: 'text' as const, text: 'Error: only https URLs are allowed.' }], isError: true };
+      }
+
+      // Only fetch URLs that actually appear as inline images in this ticket,
+      // so the tool cannot be used as an arbitrary URL fetcher
+      const ticket = await client.viewTicket(ticket_id);
+      let knownUrls = extractInlineImageUrls(ticket.description);
+      if (!knownUrls.includes(url)) {
+        const conversations = await client.listConversations(ticket_id);
+        knownUrls = conversations.flatMap(c => extractInlineImageUrls(c.body));
+      }
+      if (!knownUrls.includes(url)) {
+        return { content: [{ type: 'text' as const, text: `Error: that URL does not appear as an inline image on ticket #${ticket_id}.` }], isError: true };
+      }
+
+      const download = await client.downloadAttachment(url, MAX_ATTACHMENT_BYTES);
+      const mimeType = resolveImageType(download.contentType, download.data);
+
+      if (!SUPPORTED_IMAGE_TYPES.has(mimeType)) {
+        return { content: [{ type: 'text' as const, text: `The URL returned ${mimeType}, which is not a supported image type (${[...SUPPORTED_IMAGE_TYPES].join(', ')}).` }], isError: true };
+      }
+
+      return {
+        content: [
+          { type: 'image' as const, data: download.data.toString('base64'), mimeType },
+          { type: 'text' as const, text: `Inline image (${mimeType}, ${download.size} bytes)` },
+        ],
+      };
+    } catch (error) {
+      return { content: [{ type: 'text' as const, text: `Error: ${error instanceof Error ? error.message : String(error)}` }], isError: true };
     }
   }
 );
