@@ -74,6 +74,7 @@ Source: ${source}
 Requester ID: ${ticket.requester_id}
 ${ticket.responder_id ? `Assigned Agent ID: ${ticket.responder_id}` : 'Unassigned'}
 ${ticket.group_id ? `Group ID: ${ticket.group_id}` : ''}
+${ticket.company_id ? `Company ID: ${ticket.company_id}` : 'Company ID: N/A'}
 Created: ${ticket.created_at}
 Updated: ${ticket.updated_at}
 ${ticket.tags && (ticket.tags as string[]).length > 0 ? `Tags: ${(ticket.tags as string[]).join(', ')}` : ''}
@@ -294,6 +295,7 @@ server.tool(
     type: z.string().optional(),
     group_id: z.number().optional(),
     responder_id: z.number().optional(),
+    company_id: z.number().optional().describe('Company ID to associate with this ticket'),
     tags: z.array(z.string()).optional(),
   },
   async ({ ticket_id, ...params }) => {
@@ -306,6 +308,7 @@ server.tool(
       if (params.type) updateParams.type = params.type;
       if (params.group_id) updateParams.group_id = params.group_id;
       if (params.responder_id) updateParams.responder_id = params.responder_id;
+      if (params.company_id) updateParams.company_id = params.company_id;
       if (params.tags) updateParams.tags = params.tags;
 
       const ticket = await client.updateTicket(ticket_id, updateParams);
