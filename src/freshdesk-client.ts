@@ -21,6 +21,7 @@ export interface Ticket {
   requester_id: number;
   responder_id?: number;
   group_id?: number;
+  company_id?: number;
   type?: string;
   due_by?: string;
   fr_due_by?: string;
@@ -42,6 +43,7 @@ export interface CreateTicketParams {
   type?: string;
   group_id?: number;
   responder_id?: number;
+  company_id?: number;
   tags?: string[];
   custom_fields?: Record<string, unknown>;
 }
