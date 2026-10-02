@@ -62,6 +62,11 @@ export interface ListTicketsParams {
 
 // ==================== CONTACTS ====================
 
+export interface OtherCompany {
+  company_id: number;
+  view_all_tickets?: boolean;
+}
+
 export interface Contact {
   id: number;
   name: string;
@@ -75,6 +80,7 @@ export interface Contact {
   language?: string;
   time_zone?: string;
   company_id?: number;
+  other_companies?: OtherCompany[];
   active: boolean;
   tags: string[];
   created_at: string;
@@ -94,11 +100,14 @@ export interface CreateContactParams {
   language?: string;
   time_zone?: string;
   company_id?: number;
+  other_companies?: OtherCompany[];
   tags?: string[];
   custom_fields?: Record<string, unknown>;
 }
 
-export interface UpdateContactParams extends Partial<CreateContactParams> {}
+export interface UpdateContactParams extends Omit<Partial<CreateContactParams>, 'company_id'> {
+  company_id?: number | null;
+}
 
 // ==================== CONVERSATIONS ====================
 
