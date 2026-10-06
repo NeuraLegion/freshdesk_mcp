@@ -36,6 +36,11 @@ const client = new FreshdeskClient({
 });
 
 // Status and priority mappings
+const otherCompanySchema = z.object({
+  company_id: z.number().describe('Company ID'),
+  view_all_tickets: z.boolean().optional().describe('Let the contact view all tickets of this company'),
+});
+
 const STATUS_MAP: Record<number, string> = {
   2: 'Open',
   3: 'Pending',
@@ -90,6 +95,7 @@ Email: ${contact.email || 'N/A'}
 Phone: ${contact.phone || 'N/A'}
 Mobile: ${contact.mobile || 'N/A'}
 Company ID: ${contact.company_id || 'N/A'}
+${Array.isArray(contact.other_companies) && contact.other_companies.length > 0 ? `Other Companies: ${(contact.other_companies as Array<{ company_id: number; view_all_tickets?: boolean }>).map((c) => `${c.company_id}${c.view_all_tickets ? ' (view all tickets)' : ''}`).join(', ')}` : ''}
 Job Title: ${contact.job_title || 'N/A'}
 Active: ${contact.active}
 Created: ${contact.created_at}
@@ -394,7 +400,8 @@ server.tool(
     address: z.string().optional(),
     description: z.string().optional(),
     job_title: z.string().optional(),
-    company_id: z.number().optional(),
+    company_id: z.number().nullable().optional().describe('Company ID to link, or null to remove the contact\'s company association'),
+    other_companies: z.array(otherCompanySchema).optional().describe('Additional companies for the contact. Replaces the contact\'s entire list of additional companies.'),
     tags: z.array(z.string()).optional(),
   },
   async ({ contact_id, ...params }) => {
@@ -493,6 +500,7 @@ server.tool(
     description: z.string().optional(),
     job_title: z.string().optional(),
     company_id: z.number().optional(),
+    other_companies: z.array(otherCompanySchema).optional().describe('Additional companies for the contact'),
     tags: z.array(z.string()).optional(),
   },
   async (params) => {
@@ -506,6 +514,7 @@ server.tool(
         description: params.description,
         job_title: params.job_title,
         company_id: params.company_id,
+        other_companies: params.other_companies,
         tags: params.tags,
       };
       const contact = await client.createContact(createParams);
